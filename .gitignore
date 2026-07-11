@@ -1,5 +1,0 @@
-venv/
-trained_models/
-logs/
-__pycache__/
-*.py[cod]
