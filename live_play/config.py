@@ -49,4 +49,11 @@ ACTION_TO_KEY = {
 
 # Overlay window
 OVERLAY_WINDOW_NAME = "Subway Surfers — model view"
-OVERLAY_SCALE = 3  # upscale factor for the small captured frame in the overlay
+# The overlay letterboxes the captured game frame into a fixed box of this
+# size (px), preserving aspect ratio, then shows a stats panel beside it. A
+# fixed box (rather than a blind scale factor) keeps the window a sane size no
+# matter how large or small the capture region is, and keeps every rendered
+# frame identical in size (required for video encoding). ~9:16 phone aspect.
+OVERLAY_GAME_HEIGHT = 560
+OVERLAY_GAME_WIDTH = 316
+OVERLAY_PANEL_WIDTH = 360
