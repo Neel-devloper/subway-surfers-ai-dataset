@@ -55,9 +55,32 @@ class ActionPredictor:
         self.model.eval()
         torch.set_num_threads(max(os.cpu_count() or 1, 1))
 
+    def _center_crop_to_aspect(self, frame_rgb: np.ndarray) -> np.ndarray:
+        """Crop to the model's width:height aspect, centered. No-op when the
+        frame already matches (e.g. native portrait training screenshots)."""
+        h, w = frame_rgb.shape[:2]
+        target = self.width / self.height
+        cur = w / h
+        # Tolerance covers the small spread of native screenshot aspects
+        # (~0.56-0.57) so they stay a true no-op; only clearly-off (e.g.
+        # landscape) frames get cropped.
+        if abs(cur - target) <= 0.02 * target + 1e-6:
+            return frame_rgb
+        if cur > target:  # too wide -> trim width
+            new_w = max(1, int(round(h * target)))
+            x0 = (w - new_w) // 2
+            return frame_rgb[:, x0:x0 + new_w]
+        # too tall -> trim height
+        new_h = max(1, int(round(w / target)))
+        y0 = (h - new_h) // 2
+        return frame_rgb[y0:y0 + new_h, :]
+
     def _preprocess(self, frame_rgb: np.ndarray) -> torch.Tensor:
         # frame_rgb: HxWx3 uint8, RGB, arbitrary size -> resize to model input.
         from PIL import Image
+
+        if getattr(config, "CROP_TO_TRAINING_ASPECT", False):
+            frame_rgb = self._center_crop_to_aspect(frame_rgb)
 
         im = Image.fromarray(frame_rgb).resize((self.width, self.height), Image.BILINEAR)
         arr = np.asarray(im, dtype=np.float32) / 255.0  # HxWx3
