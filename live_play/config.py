@@ -25,6 +25,23 @@ DEFAULT_GAME_URL = "https://poki.com/en/g/subway-surfers"
 # shouldn't; lower it if it feels sluggish to react.
 CONFIDENCE_THRESHOLD = 0.60
 
+# The model was trained on PORTRAIT (~9:16) mobile screenshots. A browser
+# capture is often LANDSCAPE, and squishing that straight to the portrait model
+# input distorts everything horizontally (the main cause of weak browser play).
+# When True, the predictor first center-crops each frame to the model's aspect
+# ratio, then resizes — so a wide capture contributes its centre column (where
+# the lanes/character are) instead of a squished full width. This is a no-op for
+# frames that already match the training aspect, so it never hurts native input.
+CROP_TO_TRAINING_ASPECT = True
+
+# Subway Surfers gameplay scrolls constantly, so a nearly-static frame means a
+# menu / paused / "run over" screen — which is out-of-distribution for the model
+# (it has no "not gameplay" class and tends to false-fire on it). When enabled,
+# the controller suppresses actions while the scene is static. Threshold is mean
+# absolute per-pixel difference (0-255) below which two frames count as "same".
+SUPPRESS_STATIC_SCENE = True
+STATIC_SCENE_DIFF_THRESHOLD = 2.0
+
 # Minimum seconds between two key presses of the SAME action, so one
 # confident frame doesn't fire the same swipe five times in a row.
 ACTION_COOLDOWN_SEC = {

@@ -39,11 +39,31 @@ class PlayController:
     confidence_threshold: float = config.CONFIDENCE_THRESHOLD
     cooldowns: Dict[str, float] = field(default_factory=lambda: dict(config.ACTION_COOLDOWN_SEC))
     action_to_key: Dict[str, str] = field(default_factory=lambda: dict(config.ACTION_TO_KEY))
+    suppress_static: bool = getattr(config, "SUPPRESS_STATIC_SCENE", False)
+    static_diff_threshold: float = getattr(config, "STATIC_SCENE_DIFF_THRESHOLD", 2.0)
 
     _last_fired_at: Dict[str, float] = field(default_factory=dict, init=False)
+    _prev_small: Optional[np.ndarray] = field(default=None, init=False)
+
+    def _is_static(self, frame_rgb: np.ndarray) -> bool:
+        """True if this frame is ~identical to the previous one (menu/paused/
+        crashed screen). Gameplay scrolls constantly, so it is never static."""
+        # Downsample to 32x32 grayscale for a cheap, noise-tolerant comparison.
+        small = frame_rgb[::max(1, frame_rgb.shape[0] // 32),
+                          ::max(1, frame_rgb.shape[1] // 32)].mean(axis=2)
+        prev = self._prev_small
+        self._prev_small = small
+        if prev is None or prev.shape != small.shape:
+            return False
+        return float(np.abs(small - prev).mean()) < self.static_diff_threshold
 
     def step(self, frame_rgb: np.ndarray, now: Optional[float] = None) -> Decision:
         now = time.time() if now is None else now
+
+        if self.suppress_static and self._is_static(frame_rgb):
+            pred = self.predictor.predict(frame_rgb)
+            return Decision(pred, "NONE", False, None, "static scene (menu/paused)")
+
         pred = self.predictor.predict(frame_rgb)
 
         # NONE means "don't act" — the model's way of saying keep running.
