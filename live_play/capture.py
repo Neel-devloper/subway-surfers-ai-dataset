@@ -30,6 +30,17 @@ class Region:
     def as_mss_dict(self) -> dict:
         return {"left": self.left, "top": self.top, "width": self.width, "height": self.height}
 
+    @classmethod
+    def parse(cls, spec: str) -> "Region":
+        """Parse a 'left,top,width,height' string (e.g. '120,80,540,960')."""
+        parts = [p.strip() for p in spec.split(",")]
+        if len(parts) != 4:
+            raise ValueError("region must be 'left,top,width,height'")
+        left, top, width, height = (int(float(p)) for p in parts)
+        if width <= 0 or height <= 0:
+            raise ValueError("region width/height must be positive")
+        return cls(left, top, width, height)
+
 
 def load_region(path: str = config.REGION_CONFIG_PATH) -> Optional[Region]:
     if not os.path.exists(path):

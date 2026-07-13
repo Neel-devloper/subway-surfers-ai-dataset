@@ -54,6 +54,41 @@ pip install -r live_play/requirements.txt
    After Chrome opens, switch to the game, start a run, and **click the game so
    it has keyboard focus** — key presses go to the focused window.
 
+## Non-interactive / automated runs
+
+For running without the drag-box calibrator or a human at the keyboard (e.g.
+driven by an assistant like Claude Cowork), skip `calibrate.py` and pass the
+region + stop conditions directly:
+
+```bash
+# 1. Sanity-check calibration + predictions on ONE frame (writes probe.png):
+python live_play/probe.py --region 120,80,540,960 --out probe.png
+
+# 2. Watch decisions for 30s WITHOUT sending keys, and record it:
+python live_play/main.py --no-open --dry-run --region 120,80,540,960 \
+    --duration 30 --record dryrun.mp4 --headless
+
+# 3. Actually play for 60s and record:
+python live_play/main.py --no-open --region 120,80,540,960 \
+    --duration 60 --record play.mp4
+```
+
+Useful flags: `--region L,T,W,H` (skip calibration), `--duration SEC` /
+`--max-steps N` (auto-stop), `--record out.mp4` (annotated recording),
+`--headless` (no live window — just record + a printed summary). `probe.png` /
+the recordings are what you share back to review how it's doing.
+
+### macOS permissions (important)
+
+On macOS the app running Python (Terminal, iTerm, or the assistant's shell)
+must be granted, in **System Settings → Privacy & Security**:
+
+- **Screen Recording** — otherwise `mss` captures a black/empty frame.
+- **Accessibility** — otherwise `pyautogui` key presses are silently dropped.
+
+Grant both, then restart the terminal app. Run `probe.py` first: if the saved
+image is black, Screen Recording isn't granted.
+
 ### Controls / safety
 
 - Press **`q`** or **ESC** in the overlay window to stop.
@@ -115,5 +150,6 @@ transfer well or may need help. If it plays poorly:
 | `browser.py` | opens Chrome in a new window, cross-platform |
 | `overlay.py` | the live "model view" window / frame renderer |
 | `main.py` | live-play entrypoint (the loop) |
+| `probe.py` | one-shot: capture a frame, show/save the model's prediction |
 | `replay.py` | offline validator over recorded frames → video |
 | `test_controller.py` | deterministic tests for the decision logic |
