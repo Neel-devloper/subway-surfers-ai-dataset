@@ -1,0 +1,119 @@
+# Live play — watch the model play Subway Surfers in your browser
+
+This package runs the trained model (`models/subway_surfers_cnn.pth`) as a live
+controller: it captures the game area of your screen, predicts a swipe every
+frame, and presses the matching arrow key in your browser — while showing you
+exactly what it's "seeing" and deciding.
+
+```
+  screen region ──capture──▶ model ──▶ confidence gate + cooldown ──▶ arrow key
+        ▲                                                                  │
+        └───────────────────────── you watch the overlay ◀────────────────┘
+```
+
+## Important: where this runs
+
+This runs **on your own computer**, not in the cloud. It needs to see your
+screen and drive your keyboard, so it uses local libraries (`mss` for capture,
+`pyautogui` for key presses, `opencv` for the overlay window). It was developed
+and pipeline-tested in a headless container, but the live loop must be launched
+by you locally.
+
+## Setup (once)
+
+```bash
+pip install -r live_play/requirements.txt
+```
+
+## Run it
+
+1. **Open the game and position its window.** Either let the controller open
+   Chrome for you (default) or open it yourself.
+
+2. **Calibrate the capture region** (once, or whenever you move/resize the
+   window). Start a run so the game canvas is visible, then:
+
+   ```bash
+   python live_play/calibrate.py
+   ```
+
+   Drag a box around **just the game canvas** (exclude the browser toolbar,
+   page margins, and any ads) and press ENTER. This is saved to
+   `region_config.json`. Boxing tightly around the canvas makes the captured
+   frame resemble the training screenshots, which matters for accuracy.
+
+3. **Play:**
+
+   ```bash
+   python live_play/main.py                 # opens Chrome in a new window, then plays
+   python live_play/main.py --no-open       # you already have the game open
+   python live_play/main.py --dry-run       # decide + show overlay, but send NO keys
+   python live_play/main.py --url <game-url> # use a different Subway Surfers URL
+   ```
+
+   After Chrome opens, switch to the game, start a run, and **click the game so
+   it has keyboard focus** — key presses go to the focused window.
+
+### Controls / safety
+
+- Press **`q`** or **ESC** in the overlay window to stop.
+- **Slam your mouse into any screen corner** to trigger `pyautogui`'s fail-safe
+  and abort instantly — a good panic button while the model drives the keyboard.
+- Start with `--dry-run` to watch its decisions without it actually pressing
+  keys, until you trust the calibration and predictions.
+
+## How the model plays
+
+Each captured frame is resized to the model's 128×72 input and classified into
+`UP / DOWN / LEFT / RIGHT / NONE`. A key is sent only when:
+
+1. the top class isn't `NONE`, **and**
+2. its confidence ≥ `CONFIDENCE_THRESHOLD` (default 0.60), **and**
+3. that action isn't still in its cooldown window.
+
+`NONE` means "keep running — do nothing." All thresholds, cooldowns, the target
+FPS, the key mapping, and the default game URL live in `config.py`.
+
+## Offline replay (no browser needed)
+
+`replay.py` feeds recorded dataset screenshots through the **exact same
+decision code** used live (with key presses stubbed out) and renders an
+annotated video. It's how the pipeline was validated end-to-end without a real
+game attached:
+
+```bash
+python live_play/replay.py --source medium --limit 250 --out demo.mp4
+```
+
+Note the accuracy it reports is on frames the model largely trained on, so it's
+optimistic versus real play — held-out validation accuracy was ~79% (see
+`training/README.md`). Replay's job is to prove the plumbing, and to eyeball
+the model's behaviour frame by frame.
+
+## The one honest caveat about browser play
+
+The model was trained on **mobile-app** screenshots. The browser build looks
+somewhat different (aspect ratio, HUD, surrounding page). The model may
+transfer well or may need help. If it plays poorly:
+
+- Re-calibrate so the box hugs the canvas tightly (biggest lever).
+- Try lowering/raising `CONFIDENCE_THRESHOLD` in `config.py`.
+- If it's still off, collect a small set of browser frames labeled by the right
+  action and fine-tune — the training pipeline in `training/` already supports
+  this; a few minutes of browser data usually closes the gap.
+
+## Files
+
+| File | Role |
+|------|------|
+| `config.py` | all tunables (thresholds, cooldowns, URL, overlay size) |
+| `predictor.py` | loads the `.pth`, frame → action + confidence |
+| `controller.py` | the shared decision logic (gate + cooldown) |
+| `controls.py` | input backends (`pyautogui` real, dry-run stub) |
+| `capture.py` | `mss` screen-region capture + region config I/O |
+| `calibrate.py` | interactive region selector |
+| `browser.py` | opens Chrome in a new window, cross-platform |
+| `overlay.py` | the live "model view" window / frame renderer |
+| `main.py` | live-play entrypoint (the loop) |
+| `replay.py` | offline validator over recorded frames → video |
+| `test_controller.py` | deterministic tests for the decision logic |

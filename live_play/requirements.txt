@@ -1,0 +1,11 @@
+# Live-play controller dependencies (install on the machine that runs the game).
+torch>=2.0
+pillow
+numpy
+mss              # fast screen-region capture
+pyautogui        # sends arrow-key presses to the focused browser window
+opencv-python    # live overlay window ("watch the model play")
+
+# Only needed to render the offline replay video (live_play/replay.py):
+imageio
+imageio-ffmpeg

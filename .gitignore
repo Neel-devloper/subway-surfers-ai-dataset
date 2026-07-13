@@ -8,5 +8,10 @@ venv/
 # Training artifacts / logs
 training/*.log
 
+# Live-play generated artifacts + machine-specific calibration
+live_play/*.mp4
+live_play/sample_overlay_frame.png
+live_play/region_config.json
+
 # OS
 .DS_Store
