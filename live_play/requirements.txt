@@ -4,6 +4,7 @@ pillow
 numpy
 mss              # fast screen-region capture
 pyautogui        # sends arrow-key presses to the focused browser window
+pynput           # reads your keystrokes while recording training data (record_browser.py)
 opencv-python    # live overlay window ("watch the model play")
 
 # Only needed to render the offline replay video (live_play/replay.py):

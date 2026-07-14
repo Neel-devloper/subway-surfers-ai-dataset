@@ -109,6 +109,49 @@ Each captured frame is resized to the model's 128×72 input and classified into
 `NONE` means "keep running — do nothing." All thresholds, cooldowns, the target
 FPS, the key mapping, and the default game URL live in `config.py`.
 
+## Improving the model: record browser data + fine-tune
+
+The model was trained on **mobile** screenshots, so it plays the browser build
+below its potential. The fix is to record real browser gameplay and fine-tune.
+
+**1. Record labeled data — you play, it watches your keystrokes:**
+
+```bash
+python live_play/record_browser.py --region 0,171,466,585 --duration 600
+```
+
+Play normally for ~10 min. Each frame near an arrow-key press is saved labeled
+with that action into `screen_collector/screens/browser/<ACTION>/`; a subsample
+of the rest are saved as `NONE`. A raw keystroke log + manifest are written per
+session (under `browser/_sessions/`) so the data can be re-labeled offline. On
+macOS this needs **Input Monitoring** permission (to read your keys) on top of
+Screen Recording. Aim for a few hundred+ action frames across several runs.
+
+Tip for better data: also record a few runs where you deliberately let the model
+play and take over only to correct its mistakes — that captures the recovery
+states pure expert play never visits.
+
+**2. Fine-tune, warm-starting from the current model:**
+
+```bash
+python training/train.py \
+    --init-from models/subway_surfers_cnn.pth \
+    --out models/subway_surfers_cnn_browser.pth \
+    --browser-oversample 4 --epochs 12 --lr 3e-4
+```
+
+`--browser-oversample N` replicates the (initially small) browser frames so they
+carry weight against the ~4,400 mobile frames; a lower `--lr` and fewer epochs
+avoid wiping out what the model already knows. The original checkpoint is left
+untouched.
+
+**3. Play with the fine-tuned model:**
+
+```bash
+python live_play/main.py --no-open --region 0,171,466,585 \
+    --checkpoint models/subway_surfers_cnn_browser.pth --duration 60 --record play.mp4
+```
+
 ## Offline replay (no browser needed)
 
 `replay.py` feeds recorded dataset screenshots through the **exact same
