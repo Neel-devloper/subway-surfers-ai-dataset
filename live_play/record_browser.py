@@ -34,6 +34,7 @@ import config
 from capture import Region, ScreenCapture, load_region
 
 ARROW_TO_ACTION = {"up": "UP", "down": "DOWN", "left": "LEFT", "right": "RIGHT"}
+WASD_TO_ACTION = {"w": "UP", "s": "DOWN", "a": "LEFT", "d": "RIGHT"}
 ACTIONS = ["UP", "DOWN", "LEFT", "RIGHT", "NONE"]
 
 
@@ -75,7 +76,8 @@ class KeyWatcher:
             self.stop_requested = True
             return
         name = getattr(key, "name", None)
-        action = ARROW_TO_ACTION.get(name or "")
+        char = getattr(key, "char", None)
+        action = ARROW_TO_ACTION.get(name or "") or WASD_TO_ACTION.get((char or "").lower())
         if action:
             t = time.time()
             self.presses.append((t, action))
