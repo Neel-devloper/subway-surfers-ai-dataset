@@ -81,13 +81,22 @@ def main() -> None:
     ap.add_argument("--weight-decay", type=float, default=1e-4)
     ap.add_argument("--val-frac", type=float, default=0.15)
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument("--init-from", default=None,
+                    help="warm-start from an existing .pth (fine-tuning)")
+    ap.add_argument("--out", default=CKPT_PATH, help="output checkpoint path")
+    ap.add_argument("--browser-oversample", type=int, default=1,
+                    help="replicate browser/ training samples N times to bias fine-tuning "
+                         "toward the browser domain")
     args = ap.parse_args()
+
+    out_path = args.out
+    metrics_path = os.path.splitext(out_path)[0] + "_metrics.json"
 
     set_seed(args.seed)
     torch.set_num_threads(os.cpu_count() or 4)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    os.makedirs(MODELS_DIR, exist_ok=True)
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
     print(f"Scanning {SCREENS_ROOT} ...")
     samples = find_samples(SCREENS_ROOT)
@@ -96,6 +105,11 @@ def main() -> None:
     train_samples, val_samples = stratified_split(
         samples, val_frac=args.val_frac, seed=args.seed
     )
+    if args.browser_oversample > 1:
+        extra = [s for s in train_samples if os.sep + "browser" + os.sep in s[0]]
+        train_samples = train_samples + extra * (args.browser_oversample - 1)
+        print(f"Oversampled {len(extra)} browser train frames x{args.browser_oversample} "
+              f"(+{len(extra) * (args.browser_oversample - 1)})")
     print(f"Total {len(samples)} | train {len(train_samples)} | val {len(val_samples)}")
 
     print("Loading + caching images into RAM ...")
@@ -126,6 +140,12 @@ def main() -> None:
     model = build_model().to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"Model params: {n_params:,}")
+
+    if args.init_from:
+        ck = torch.load(args.init_from, map_location=device, weights_only=False)
+        model.load_state_dict(ck["state_dict"])
+        print(f"Warm-started from {args.init_from} "
+              f"(val_acc {ck.get('val_acc', '?')}, bal {ck.get('val_balanced_acc', '?')})")
 
     # Class-weighted loss as a second defense against imbalance.
     weights = class_weights(train_samples).to(device)
@@ -167,7 +187,7 @@ def main() -> None:
         marker = ""
         if balanced > best_balanced:
             best_balanced = balanced
-            save_checkpoint(model, args, n_params, acc, balanced)
+            save_checkpoint(model, out_path, n_params, acc, balanced)
             marker = "  <- saved (best)"
         print(
             f"epoch {epoch:2d}/{args.epochs}  "
@@ -177,7 +197,7 @@ def main() -> None:
 
     # Final report using the best checkpoint.
     print("\nReloading best checkpoint for final report ...")
-    ckpt = torch.load(CKPT_PATH, map_location=device, weights_only=False)
+    ckpt = torch.load(out_path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["state_dict"])
     acc, balanced, recalls, confusion = evaluate(model, val_loader, device)
     print(f"\nBest model  val_acc={acc:.3f}  balanced_acc={balanced:.3f}")
@@ -189,7 +209,7 @@ def main() -> None:
     for i, c in enumerate(CLASSES):
         print(f"{c:6s} " + "".join(f"{confusion[i, j]:7d}" for j in range(len(CLASSES))))
 
-    with open(METRICS_PATH, "w") as f:
+    with open(metrics_path, "w") as f:
         json.dump(
             {
                 "history": history,
@@ -201,15 +221,17 @@ def main() -> None:
                 },
                 "num_params": n_params,
                 "num_samples": len(samples),
+                "init_from": args.init_from,
+                "browser_oversample": args.browser_oversample,
             },
             f,
             indent=2,
         )
-    print(f"\nSaved checkpoint -> {CKPT_PATH}")
-    print(f"Saved metrics    -> {METRICS_PATH}")
+    print(f"\nSaved checkpoint -> {out_path}")
+    print(f"Saved metrics    -> {metrics_path}")
 
 
-def save_checkpoint(model, args, n_params, acc, balanced) -> None:
+def save_checkpoint(model, out_path, n_params, acc, balanced) -> None:
     torch.save(
         {
             "state_dict": model.state_dict(),
@@ -225,7 +247,7 @@ def save_checkpoint(model, args, n_params, acc, balanced) -> None:
             "val_acc": acc,
             "val_balanced_acc": balanced,
         },
-        CKPT_PATH,
+        out_path,
     )
 
 
