@@ -120,12 +120,21 @@ below its potential. The fix is to record real browser gameplay and fine-tune.
 python live_play/record_browser.py --region 0,171,466,585 --duration 600
 ```
 
-Play normally for ~10 min. Each frame near an arrow-key press is saved labeled
-with that action into `screen_collector/screens/browser/<ACTION>/`; a subsample
-of the rest are saved as `NONE`. A raw keystroke log + manifest are written per
-session (under `browser/_sessions/`) so the data can be re-labeled offline. On
-macOS this needs **Input Monitoring** permission (to read your keys) on top of
-Screen Recording. Aim for a few hundred+ action frames across several runs.
+Play normally for ~10 min (arrow keys or WASD). Each frame near a key press is
+saved labeled with that action into `screen_collector/screens/browser/<ACTION>/`;
+a subsample of the rest are saved as `NONE`. A raw keystroke log + manifest are
+written per session (under `browser/_sessions/`) so the data can be re-labeled
+offline. On macOS this needs **Input Monitoring** permission (to read your keys)
+on top of Screen Recording. Aim for a few hundred+ action frames across several
+runs.
+
+The recorder **verifies the scene is live before starting**: it samples the
+region and aborts if the content is static or featureless (a desktop wallpaper,
+blank area, or paused game — one early session silently recorded 2,488 frames
+of wallpaper because the game wasn't visible in the captured region). It also
+saves a `preview.png` per session — **always check it shows the game** — skips
+frames while the scene is static mid-run (menus/crash screens), and reports the
+static percentage in the final summary. `--force` overrides the startup check.
 
 Tip for better data: also record a few runs where you deliberately let the model
 play and take over only to correct its mistakes — that captures the recovery

@@ -42,10 +42,30 @@ def find_samples(screens_root: str) -> List[Tuple[str, int]]:
     return samples
 
 
+def _center_crop_to_aspect(im: Image.Image) -> Image.Image:
+    """Crop to the model's width:height aspect, centered — mirroring the
+    inference-side preprocessing in live_play/predictor.py so train and test
+    see the same geometry. No-op for frames already at the training aspect
+    (all native mobile screenshots); crops the wider browser captures."""
+    w, h = im.size
+    target = INPUT_WIDTH / INPUT_HEIGHT
+    cur = w / h
+    if abs(cur - target) <= 0.02 * target + 1e-6:
+        return im
+    if cur > target:  # too wide -> trim width
+        new_w = max(1, int(round(h * target)))
+        x0 = (w - new_w) // 2
+        return im.crop((x0, 0, x0 + new_w, h))
+    new_h = max(1, int(round(w / target)))  # too tall -> trim height
+    y0 = (h - new_h) // 2
+    return im.crop((0, y0, w, y0 + new_h))
+
+
 def _load_resized(path: str) -> np.ndarray:
     """Decode one image to a uint8 HxWx3 array at the model input size."""
     with Image.open(path) as im:
-        im = im.convert("RGB").resize((INPUT_WIDTH, INPUT_HEIGHT), Image.BILINEAR)
+        im = _center_crop_to_aspect(im.convert("RGB"))
+        im = im.resize((INPUT_WIDTH, INPUT_HEIGHT), Image.BILINEAR)
         return np.asarray(im, dtype=np.uint8)
 
 
