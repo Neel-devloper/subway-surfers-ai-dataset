@@ -37,6 +37,44 @@ ARROW_TO_ACTION = {"up": "UP", "down": "DOWN", "left": "LEFT", "right": "RIGHT"}
 WASD_TO_ACTION = {"w": "UP", "s": "DOWN", "a": "LEFT", "d": "RIGHT"}
 ACTIONS = ["UP", "DOWN", "LEFT", "RIGHT", "NONE"]
 
+# Liveness heuristics. Subway Surfers gameplay scrolls constantly (high
+# frame-to-frame motion) and is visually busy (high local detail). A desktop
+# wallpaper / blank screen / static menu fails one or both — recording that
+# would silently produce a junk dataset (it has happened), so we check.
+MOTION_THRESHOLD = 1.5   # mean abs pixel diff between frames ~0.5s apart
+DETAIL_THRESHOLD = 1.5   # mean abs horizontal gradient within one frame
+
+
+def frame_motion(a: np.ndarray, b: np.ndarray) -> float:
+    """Mean absolute per-pixel difference between two frames (grayscale)."""
+    ga = a.mean(axis=2).astype(np.float32)
+    gb = b.mean(axis=2).astype(np.float32)
+    return float(np.abs(ga - gb).mean())
+
+
+def frame_detail(a: np.ndarray) -> float:
+    """Mean absolute horizontal gradient — smooth gradients (wallpaper) score
+    far lower than game scenes full of tracks, trains, and HUD edges."""
+    g = a.mean(axis=2).astype(np.float32)
+    return float(np.abs(np.diff(g, axis=1)).mean())
+
+
+def scene_looks_live(a: np.ndarray, b: np.ndarray) -> Tuple[bool, str]:
+    """Decide whether two frames sampled ~0.5s apart look like live gameplay.
+    Returns (ok, reason)."""
+    motion = frame_motion(a, b)
+    detail = frame_detail(a)
+    if motion < MOTION_THRESHOLD and detail < DETAIL_THRESHOLD:
+        return False, (f"scene is static AND featureless (motion {motion:.2f}, "
+                       f"detail {detail:.2f}) — looks like a desktop/blank screen, not the game")
+    if motion < MOTION_THRESHOLD:
+        return False, (f"scene is static (motion {motion:.2f} < {MOTION_THRESHOLD}) — "
+                       "game not running / paused / not visible in this region")
+    if detail < DETAIL_THRESHOLD:
+        return False, (f"scene has no detail (detail {detail:.2f} < {DETAIL_THRESHOLD}) — "
+                       "region may be pointing at a blank area")
+    return True, f"scene looks live (motion {motion:.2f}, detail {detail:.2f})"
+
 
 def nearest_action(
     frame_t: float, presses: List[Tuple[float, str]], window: float
@@ -108,6 +146,8 @@ def main() -> None:
     ap.add_argument("--none-keep", type=float, default=0.15,
                     help="fraction of unlabeled (NONE) frames to keep, to limit imbalance")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--force", action="store_true",
+                    help="record even if the startup liveness check fails")
     args = ap.parse_args()
 
     region = Region.parse(args.region) if args.region else load_region()
@@ -125,9 +165,34 @@ def main() -> None:
 
     from PIL import Image
 
+    cap = ScreenCapture(region)
+
+    # --- Startup liveness check: refuse to record a dead scene. -------------
+    # (A previous session silently recorded 2,488 frames of desktop wallpaper
+    # because the game wasn't visible in the captured region.)
+    print("Startup check: sampling the capture region ...")
+    a = cap.grab()
+    time.sleep(0.6)
+    b = cap.grab()
+    ok, reason = scene_looks_live(a, b)
+    preview_path = os.path.join(sess_dir, "preview.png")
+    Image.fromarray(b).save(preview_path)
+    print(f"  {reason}")
+    print(f"  preview of what is being captured -> {preview_path}")
+    if not ok:
+        if not args.force:
+            cap.close()
+            raise SystemExit(
+                "ABORTING: the capture region does not look like live gameplay.\n"
+                "Make sure the game is RUNNING (character moving), visible on the\n"
+                "SAME display/Space the region points at, and not covered by other\n"
+                "windows. Check the preview.png above, fix the region or window,\n"
+                "then re-run. Use --force to override this check."
+            )
+        print("  --force given: recording anyway.")
+
     watcher = KeyWatcher()
     watcher.start()
-    cap = ScreenCapture(region)
 
     print(f"Recording session {session_id}. Play the game now.")
     print("Press ESC (with this listener active) to stop early; Ctrl-C also works.")
@@ -162,11 +227,34 @@ def main() -> None:
         counts[label] += 1
         idx += 1
 
+    prev_frame: Optional[np.ndarray] = None
+    grabbed = 0
+    static_skipped = 0
+    static_streak_start: Optional[float] = None
+    static_warned = False
+
     try:
         while True:
             loop_start = time.time()
             frame = cap.grab()
-            buffer.append((loop_start, frame))
+            grabbed += 1
+
+            # Skip frames from a static scene (menu / paused / crash screen /
+            # wrong window) — they aren't gameplay and would pollute the data.
+            is_static = prev_frame is not None and frame_motion(prev_frame, frame) < 2.0
+            prev_frame = frame
+            if is_static:
+                static_skipped += 1
+                if static_streak_start is None:
+                    static_streak_start = loop_start
+                    static_warned = False
+                elif not static_warned and loop_start - static_streak_start > 3.0:
+                    print("  WARNING: scene has been static for >3s — game paused/"
+                          "crashed or not visible in the region. Not saving frames.")
+                    static_warned = True
+            else:
+                static_streak_start = None
+                buffer.append((loop_start, frame))
 
             for pt, action in watcher.drain_new():
                 events_w.writerow([f"{pt:.3f}", action])
@@ -199,16 +287,23 @@ def main() -> None:
         manifest_f.close()
 
         elapsed = time.time() - t_start
+        static_pct = 100.0 * static_skipped / max(grabbed, 1)
         print("\n=== recording summary ===")
         print(f"session:        {session_id}  ({elapsed:.0f}s)")
         print(f"key presses:    {logged_presses}")
+        print(f"frames grabbed: {grabbed}  (static/skipped: {static_skipped}, {static_pct:.0f}%)")
         print(f"frames saved:   {sum(counts.values())}  -> {args.out}")
         print(f"per class:      {dict(counts)}")
         print(f"events log:     {events_path}")
         print(f"manifest:       {manifest_path}")
+        print(f"preview:        {preview_path}  <- verify this shows the game")
+        if static_pct > 50:
+            print("\nWARNING: over half the session was a static scene — much of "
+                  "this data is NOT gameplay. Verify preview.png and the region "
+                  "before trusting this session.")
         if sum(v for k, v in counts.items() if k != 'NONE') < 40:
             print("\nNote: very few action frames captured. Check Input Monitoring "
-                  "permission (keystrokes) and that you were pressing arrow keys.")
+                  "permission (keystrokes) and that you were pressing arrow/WASD keys.")
 
 
 if __name__ == "__main__":
